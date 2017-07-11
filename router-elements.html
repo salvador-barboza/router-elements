@@ -1,0 +1,251 @@
+<script>
+  (function () {
+    'use strict';
+
+    /**
+    * RouterMixin is designed to work along `<app-route>`.
+    * The changes made to `<app-route>` `route` property are intercepted,
+    * which allows to make changes before the route is computed.
+    * @polymerMixin
+    * @mixes RouterElements.RouterMixin
+    * @summary Element class mixin that provides enhanced routing to
+    * a view.
+    */
+
+    const RouterMixin = function (baseClass) {
+      return class extends baseClass {
+        static get properties() {
+          return {
+            _route: {
+              type: Object,
+            },
+
+            _currentPath: {
+              type: String,
+              value: undefined
+            },
+            computedRoute: {
+              type: Object
+            }
+          }
+        }
+
+        constructor() {
+          super();
+          window.Router = this;
+          this.navigateTo = this.__tryToNavigate.bind(this);
+        }
+
+        ready() {
+          super.ready();
+          //When the url changes with browser's navigation events, you need to resolve that route.
+          window.onpopstate = () => this.__tryToNavigate(location.pathname, true);
+
+          //Find an <app-route> with `main-router` attribute.
+          this.__mainRouterElement = this.shadowRoot.querySelector('[main-router]');
+
+          if (!this.__mainRouterElement) {
+            console.warn(`<${this.nodeName.toLowerCase()}> requires an element with 'main-router' attribute to work.`);
+          } else {
+
+            /**
+            * If the route changed from an inner router, there is no need to resolve the route.
+            * Just push it to state.
+            */
+            this.__mainRouterElement.addEventListener('route-changed', ({detail}) => {
+              if (typeof detail.value === 'string') {
+                history.pushState(null, null, detail.value);
+              }
+            });
+          }
+        }
+
+
+        /**
+        * Called to start the router.
+        */
+        start() {
+          this.__tryToNavigate(location.pathname);
+        }
+
+        /**
+        * This method is called before any change is propagated to
+        * the  `route` object. Used to update the active state of a
+        * fragment that is dependant on `route` or on the url.
+        * @fires pre-route-change
+        */
+
+        __notifyPreRouteChange() {
+          /**
+          * @event pre-route-change
+          */
+
+          this.dispatchEvent(new CustomEvent('pre-route-change'));
+        }
+
+
+
+        // Mutation methods
+
+        __tryToNavigate(pathToTry, sourceIsWindowEvent) {
+            //Resolve the route
+            let pathData = this.__matchPathToRegisteredPatterns(pathToTry);
+
+            while (pathData && pathData.redirectTo) {
+              pathData = this.__matchPathToRegisteredPatterns(pathData.redirectTo);
+            }
+
+            let navigateTo = this.navigateTo.bind(this)
+            //check if guards are truthful and redirect otherwise
+            if (pathData.canActivate && pathData.canActivate(pathData.data, navigateTo) !== true) {
+              return;
+            }
+
+            this.__notifyPreRouteChange();
+
+            if (pathData) {
+              this.__mainRouterElement.set('route', {
+                prefix: '',
+                path: pathData.computedPath,
+                __queryParams: pathData.queryParams
+              });
+
+              if (!sourceIsWindowEvent) {
+                history.pushState(null, null, pathData.computedPath);
+              }
+
+            } else {
+              this.__tryToNavigate('/404');
+            }
+          }
+
+        // Helper methods
+
+        /**
+        * Parses a route pattern.
+        * @returns {Object} Descriptors for each path in the pattern.
+        */
+        __parsePattern(pattern) {
+          let parts = pattern.split('/');
+          parts = parts.map((p, i) => {
+            let cIndex = p.indexOf(':');
+            let qIndex = p.indexOf('?');
+            let descriptor = {};
+
+            //if there is a ':', the path is data
+            if (cIndex === 0) {
+              descriptor.isData = true;
+              //if there is an '?' in the end, the path is optional
+              if (qIndex === p.length - 1) { //optional parts
+                descriptor.optional = true;
+                descriptor.name = p.substr(1, qIndex - 1);
+              } else { //required parts
+                descriptor.name = p.substr(1, p.length - 1);
+              }
+            } else {
+              descriptor.name = p;
+            }
+            return descriptor;
+          });
+
+          return parts
+        }
+
+
+        //TODO: Check later.
+        __comparePathWithPattern(path, pattern) {
+          let pathWithoutQueryParameters = path.split('?')[0];
+          let pathSegments = pathWithoutQueryParameters.split('/');
+          let data = {};
+
+          for (let i = 0; i < pattern.length; i++) {
+            //si el pattern es data
+            if (pattern[i].isData) {
+              // ver si es obligatorio o no
+              if (!pattern[i].optional) {
+                //si si y no hay parte del router, falso
+                if (!pathSegments[i]) {
+                  return false;
+                }
+              }
+              if (pathSegments[i]) {
+                data[pattern[i].name] = pathSegments[i];
+              }
+            } else {
+              if (pattern[i].name !== pathSegments[i]) {
+                return false;
+              }
+            }
+          }
+
+          return data;
+        }
+
+        __parseQueryParams(queryParamSegment) {
+          if (queryParamSegment) {
+            let queryParamStrings = queryParamSegment.split('&');
+            if (queryParamStrings) {
+              return queryParamStrings.reduce((acc, queryParamString) => {
+                let [key, value] = queryParamString.split('=');
+                acc[key] = value;
+                return acc;
+              }, {});
+            }
+          }
+        }
+
+        __matchPathToRegisteredPatterns(pathToTry) {
+          let [path, queryParamPath] = pathToTry.split('?');
+          for (let p of this.routes) {
+            let parsedPattern = this.__parsePattern(p.path)
+            let comparisonResult = this.__comparePathWithPattern(path, parsedPattern);
+
+
+            if (comparisonResult) {
+              let data = Object.assign({}, p.defaults, comparisonResult, p.data);
+              let path = parsedPattern.reduce((red, p) => `${red}${data[p.name] || p.name}/`, '');
+              if (path.endsWith('/')) {
+                path = path.substr(0, path.length - 1);
+              }
+
+              return {
+                data: data,
+                redirectTo: p.redirectTo,
+                computedPath: path,
+                canActivate: p.canActivate,
+                queryParams:  this.__parseQueryParams(queryParamPath)
+              }
+            }
+          }
+          return false;
+        }
+      }
+    }
+
+
+    /**
+    * RouterIntercepterMixin hijacks all `<a>` tags and forces a
+    * @mixes RouterElements.RouterIntercepterMixin
+    * @summary Element class mixin that hijacks `<a>`
+    */
+
+    const RouterIntercepterMixin = function (baseClass) {
+      return class extends baseClass {
+        ready() {
+          super.ready();
+          this.shadowRoot.querySelectorAll('a[routerLink]').forEach(x =>
+            x.addEventListener('click', e => {
+              e.stopPropagation();
+              e.preventDefault();
+
+              const toRoute = e.target.getAttribute('routerLink');
+              Router.navigateTo(toRoute);
+            },false));
+        }
+
+      }
+    }
+
+    window.RouterElements = window.RouterElements || { RouterMixin, RouterIntercepterMixin };
+  })();
+</script>
