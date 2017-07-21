@@ -196,7 +196,7 @@
 
         __matchPathToRegisteredPatterns(pathToTry) {
           let [path, queryParamPath] = pathToTry.split('?');
-          for (let p of this.routes) {
+          for (let p of this.contructor.routes) {
             let parsedPattern = this.__parsePattern(p.path)
             let comparisonResult = this.__comparePathWithPattern(path, parsedPattern);
 
