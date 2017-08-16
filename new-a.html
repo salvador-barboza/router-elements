@@ -1,0 +1,36 @@
+<link rel="import" href="../polymer/polymer-element.html">
+<link rel="import" href="./router-elements.html">
+
+<dom-module id="new-a">
+  <template>
+    <style>
+      
+    </style>
+    <div on-tap="_goTo">
+      <slot></slot>
+    </div>
+  </template>
+
+  <script>
+    class NewA extends Polymer.Element {
+      static get is() { return 'new-a'; }
+
+      static get properties() {
+        return {
+          href: String,
+        };
+      }
+
+      _goTo(event) {
+        event.stopPropagation();
+        event.preventDefault();
+        const { href } = this;
+        if(href) {
+          Router.navigateTo(href);
+        }
+      }
+    }
+
+    window.customElements.define(NewA.is, NewA);
+  </script>
+</dom-module>
