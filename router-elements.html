@@ -107,8 +107,11 @@
               this.__mainRouterElement.set('route', {
                 prefix: '',
                 path: pathData.computedPath,
+                data: pathData,
                 __queryParams: pathData.queryParams
               });
+
+              this.set('routerData', pathData.data);
 
               if (!sourceIsWindowEvent) {
                 history.pushState(null, null, pathData.computedPath);
