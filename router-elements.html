@@ -13,7 +13,7 @@
     */
 
     const RouterMixin = function (baseClass) {
-      return class extends baseClass {
+      return class extends Polymer.mixinBehaviors([Polymer.AppRouteConverterBehavior], baseClass) {
         static get properties() {
           return {
             _route: {
@@ -34,10 +34,12 @@
           super();
           window.Router = this;
           this.navigateTo = this.__tryToNavigate.bind(this);
+          this.parsedPatterns = this.__parsePatterns(this.routes);
         }
 
         ready() {
           super.ready();
+          console.log(this);
           //When the url changes with browser's navigation events, you need to resolve that route.
           window.onpopstate = () => this.__tryToNavigate(location.pathname, true);
 
@@ -128,30 +130,33 @@
         * Parses a route pattern.
         * @returns {Object} Descriptors for each path in the pattern.
         */
-        __parsePattern(pattern) {
-          let parts = pattern.split('/');
-          parts = parts.map((p, i) => {
-            let cIndex = p.indexOf(':');
-            let qIndex = p.indexOf('?');
-            let descriptor = {};
 
-            //if there is a ':', the path is data
-            if (cIndex === 0) {
-              descriptor.isData = true;
-              //if there is an '?' in the end, the path is optional
-              if (qIndex === p.length - 1) { //optional parts
-                descriptor.optional = true;
-                descriptor.name = p.substr(1, qIndex - 1);
-              } else { //required parts
-                descriptor.name = p.substr(1, p.length - 1);
+        __parsePatterns(routes) {
+          return routes.map(route => {
+            let parts = pattern.split('/');
+            parts = parts.map((p, i) => {
+              let cIndex = p.indexOf(':');
+              let qIndex = p.indexOf('?');
+              let descriptor = {};
+
+              //if there is a ':', the path is data
+              if (cIndex === 0) {
+                descriptor.isData = true;
+                //if there is an '?' in the end, the path is optional
+                if (qIndex === p.length - 1) { //optional parts
+                  descriptor.optional = true;
+                  descriptor.name = p.substr(1, qIndex - 1);
+                } else { //required parts
+                  descriptor.name = p.substr(1, p.length - 1);
+                }
+              } else {
+                descriptor.name = p;
               }
-            } else {
-              descriptor.name = p;
-            }
-            return descriptor;
-          });
+              return descriptor;
+            });
 
-          return parts
+            return parts
+          });
         }
 
 
@@ -199,10 +204,8 @@
 
         __matchPathToRegisteredPatterns(pathToTry) {
           let [path, queryParamPath] = pathToTry.split('?');
-          for (let p of this.constructor.routes) {
-            let parsedPattern = this.__parsePattern(p.path)
-            let comparisonResult = this.__comparePathWithPattern(path, parsedPattern);
-
+          for (let pattern of this.parsedPatterns) {
+            let comparisonResult = this.__comparePathWithPattern(path, pattern);
 
             if (comparisonResult) {
               let data = Object.assign({}, p.defaults, comparisonResult, p.data);
@@ -220,6 +223,7 @@
               }
             }
           }
+
           return false;
         }
       }
