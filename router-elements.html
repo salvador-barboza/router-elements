@@ -16,7 +16,7 @@
       return class extends Polymer.mixinBehaviors([Polymer.AppRouteConverterBehavior], baseClass) {
         static get properties() {
           return {
-            _route: {
+            route: {
               type: Object,
             },
 
@@ -34,32 +34,13 @@
           super();
           window.Router = this;
           this.navigateTo = this.__tryToNavigate.bind(this);
-          this.parsedPatterns = this.__parsePatterns(this.routes);
+          this.parsedRoutes = this.__parseRoutes(Object.getPrototypeOf(this).constructor.routes);
         }
 
         ready() {
           super.ready();
-          console.log(this);
           //When the url changes with browser's navigation events, you need to resolve that route.
           window.onpopstate = () => this.__tryToNavigate(location.pathname, true);
-
-          //Find an <app-route> with `main-router` attribute.
-          this.__mainRouterElement = this.shadowRoot.querySelector('[main-router]');
-
-          if (!this.__mainRouterElement) {
-            console.warn(`<${this.nodeName.toLowerCase()}> requires an element with 'main-router' attribute to work.`);
-          } else {
-
-            /**
-            * If the route changed from an inner router, there is no need to resolve the route.
-            * Just push it to state.
-            */
-            this.__mainRouterElement.addEventListener('route-changed', ({detail}) => {
-              if (typeof detail.value === 'string') {
-                history.pushState(null, null, detail.value);
-              }
-            });
-          }
         }
 
 
@@ -92,28 +73,27 @@
         __tryToNavigate(pathToTry, sourceIsWindowEvent) {
             //Resolve the route
             let pathData = this.__matchPathToRegisteredPatterns(pathToTry);
-
             while (pathData && pathData.redirectTo) {
               pathData = this.__matchPathToRegisteredPatterns(pathData.redirectTo);
             }
 
             let navigateTo = this.navigateTo.bind(this)
-            //check if guards are truthful and redirect otherwise
-            if (pathData.canActivate && pathData.canActivate(pathData.data, navigateTo) !== true) {
-              return;
-            }
+            // check if guards are truthful and redirect otherwise
+            // if (pathData.canActivate && pathData.canActivate(pathData.options, navigateTo) !== true) {
+            //   return;
+            // }
 
             this.__notifyPreRouteChange();
 
             if (pathData) {
-              this.__mainRouterElement.set('route', {
+              this.set('route', {
                 prefix: '',
                 path: pathData.computedPath,
-                data: pathData,
+                data: pathData.data,
                 __queryParams: pathData.queryParams
               });
 
-              this.set('routerData', pathData.data);
+              this.set('routerData', pathData.routerData);
 
               if (!sourceIsWindowEvent) {
                 history.pushState(null, null, pathData.computedPath);
@@ -131,10 +111,9 @@
         * @returns {Object} Descriptors for each path in the pattern.
         */
 
-        __parsePatterns(routes) {
+        __parseRoutes(routes) {
           return routes.map(route => {
-            let parts = pattern.split('/');
-            parts = parts.map((p, i) => {
+            let parts = route.path.split('/').map((p, i) => {
               let cIndex = p.indexOf(':');
               let qIndex = p.indexOf('?');
               let descriptor = {};
@@ -155,38 +134,38 @@
               return descriptor;
             });
 
-            return parts
+            return Object.assign(route, { parts });
           });
         }
 
 
         //TODO: Check later.
         __comparePathWithPattern(path, pattern) {
+          const { parts } = pattern;
           let pathWithoutQueryParameters = path.split('?')[0];
           let pathSegments = pathWithoutQueryParameters.split('/');
-          let data = {};
+          let routeData = {};
 
-          for (let i = 0; i < pattern.length; i++) {
+          for (let i = 0; i < parts.length; i++) {
             //si el pattern es data
-            if (pattern[i].isData) {
+            if (parts[i].isData) {
               // ver si es obligatorio o no
-              if (!pattern[i].optional) {
+              if (!parts[i].optional) {
                 //si si y no hay parte del router, falso
                 if (!pathSegments[i]) {
                   return false;
                 }
               }
               if (pathSegments[i]) {
-                data[pattern[i].name] = pathSegments[i];
+                routeData[parts[i].name] = pathSegments[i];
               }
             } else {
-              if (pattern[i].name !== pathSegments[i]) {
+              if (parts[i].name !== pathSegments[i]) {
                 return false;
               }
             }
           }
-
-          return data;
+          return Object.assign({}, pattern, {routeData});
         }
 
         __parseQueryParams(queryParamSegment) {
@@ -203,27 +182,18 @@
         }
 
         __matchPathToRegisteredPatterns(pathToTry) {
-          let [path, queryParamPath] = pathToTry.split('?');
-          for (let pattern of this.parsedPatterns) {
-            let comparisonResult = this.__comparePathWithPattern(path, pattern);
+          let [ path, queryParamPath ] = pathToTry.split('?');
 
-            if (comparisonResult) {
-              let data = Object.assign({}, p.defaults, comparisonResult, p.data);
-              let path = parsedPattern.reduce((red, p) => `${red}${data[p.name] || p.name}/`, '');
-              if (path.endsWith('/')) {
-                path = path.substr(0, path.length - 1);
+          for (let route of this.parsedRoutes) {
+            let routeData = this.__comparePathWithPattern(path, route);
+            if (routeData) {
+              let computedPath = route.parts.reduce((red, p) => `${red}${routeData.routeData[p.name] || p.name}/`, '');
+              if (computedPath.endsWith('/')) {
+                computedPath = computedPath.substr(0, computedPath.length - 1);
               }
-
-              return {
-                data: data,
-                redirectTo: p.redirectTo,
-                computedPath: path,
-                canActivate: p.canActivate,
-                queryParams:  this.__parseQueryParams(queryParamPath)
-              }
+              return Object.assign({}, route, { computedPath, queryParams:  this.__parseQueryParams(queryParamPath), data: routeData.routeData});
             }
           }
-
           return false;
         }
       }
